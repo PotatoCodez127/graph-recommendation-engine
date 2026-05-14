@@ -11,14 +11,10 @@ client = Client(
 )
 
 def build_knowledge_graph():
-    """
-    Builds an in-memory knowledge graph of entities and relationships.
-    In production, this data would live in a graph database like Neo4j.
-    """
-    print("🕸️ Building Knowledge Graph...")
-    G = nx.Graph()
+    print("🕸️ Building Directed Knowledge Graph...")
+    # FIX 1: Use a Directed Graph so relationships flow one way
+    G = nx.DiGraph()
 
-    # Add Nodes (Entities)
     movies = ["Inception", "Interstellar", "The Dark Knight", "Oppenheimer", "Tenet"]
     directors = ["Christopher Nolan"]
     actors = ["Leonardo DiCaprio", "Matthew McConaughey", "Christian Bale", "Cillian Murphy"]
@@ -29,7 +25,6 @@ def build_knowledge_graph():
     for actor in actors: G.add_node(actor, type="Actor")
     for genre in genres: G.add_node(genre, type="Genre")
 
-    # Add Edges (Relationships)
     relationships = [
         ("Christopher Nolan", "DIRECTED", "Inception"),
         ("Christopher Nolan", "DIRECTED", "Interstellar"),
@@ -57,32 +52,34 @@ def build_knowledge_graph():
         
     return G
 
-def get_graph_context(G, target_entity):
+def get_graph_context(G, target_entity, max_hops=3):
     """
-    Extracts the immediate 'neighborhood' (connections) of a specific entity.
+    Extracts a sub-graph of all nodes within 'max_hops' of the target entity,
+    preserving the strict direction of the relationships.
     """
     if target_entity not in G:
         return f"Entity '{target_entity}' not found in the knowledge graph."
         
+    # FIX 2: N-Hop Extraction. 
+    # We find all nodes within 3 hops (ignoring direction just for the search phase)
+    undirected_G = G.to_undirected()
+    relevant_nodes = list(nx.single_source_shortest_path_length(undirected_G, target_entity, cutoff=max_hops).keys())
+    
+    # We then create a mini-graph using only those nodes, which restores their strict directions
+    subgraph = G.subgraph(relevant_nodes)
+    
     context = []
-    # Find all direct connections to the target entity
-    for neighbor in G.neighbors(target_entity):
-        rel = G.edges[target_entity, neighbor]['relation']
-        context.append(f"- {target_entity} {rel} {neighbor}")
-        
-        # Go one level deeper (Multi-hop)
-        for second_neighbor in G.neighbors(neighbor):
-            if second_neighbor != target_entity:
-                rel2 = G.edges[neighbor, second_neighbor]['relation']
-                context.append(f"  -> Because {neighbor} {rel2} {second_neighbor}")
+    # Iterate through all edges in our new mini-graph
+    for source, target, data in subgraph.edges(data=True):
+        rel = data['relation']
+        context.append(f"- {source} {rel} {target}")
                 
-    # Deduplicate and return as string
-    return "\n".join(list(set(context)))
+    return "\n".join(sorted(list(set(context))))
 
 def query_graph(query: str, target_entity: str):
     G = build_knowledge_graph()
     
-    print(f"\n🔍 Extracting Graph Sub-network for '{target_entity}'...")
+    print(f"\n🔍 Extracting 3-Hop Graph Sub-network for '{target_entity}'...")
     context = get_graph_context(G, target_entity)
     print(f"🕸️ Extracted Context:\n{context}\n")
     
@@ -107,8 +104,5 @@ def query_graph(query: str, target_entity: str):
     print(f"🤖 RECOMMENDATION ENGINE:\n{response['message']['content']}\n")
 
 if __name__ == "__main__":
-    # The Complex Query: We want to see if the AI can traverse nodes from an Actor -> Movie -> Director -> Another Movie
     user_query = "I really liked Cillian Murphy's performance in Oppenheimer. Can you recommend another Sci-Fi movie directed by the same person?"
-    
-    # We anchor the search on the main entity of interest
     query_graph(user_query, target_entity="Oppenheimer")
